@@ -1,0 +1,39 @@
+﻿name: Test and Build Docker Image
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t qr-code-generator-app .
+
+      - name: Generate a QR code in the container
+        run: |
+          docker run --name qr-test \
+            -e QR_OUTPUT_DIR=/app/qr_codes \
+            -e LOG_DIR=/app/logs \
+            qr-code-generator-app --url https://www.njit.edu
+          docker logs qr-test
+
+      - name: Verify the generated image and non-root user
+        run: |
+          docker cp qr-test:/app/qr_codes/qr_code.png ./qr_code.png
+          test -s qr_code.png
+          docker run --rm --entrypoint python qr-code-generator-app -c \
+            "import os; assert os.getuid() != 0, 'Application must run as non-root'"
+          docker run --rm --entrypoint python \
+            -v "$PWD/qr_code.png:/tmp/qr_code.png:ro" \
+            qr-code-generator-app -c \
+            "from PIL import Image; image = Image.open('/tmp/qr_code.png'); image.verify(); print('QR PNG verified successfully')"
